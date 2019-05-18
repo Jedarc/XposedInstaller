@@ -64,6 +64,7 @@ public class XposedApp extends Application implements ActivityLifecycleCallbacks
     private static final File XPOSED_PROP_FILE_SYSTEMLESS_4 = new File("/xposed/xposed.prop");
     private static final File XPOSED_PROP_FILE_SYSTEMLESS_5 = new File("/magisk/PurifyXposed/system/xposed.prop");
     private static final File XPOSED_PROP_FILE_SYSTEMLESS_6 = new File("/xposed.prop");
+    private static final File XPOSED_PROP_FILE_SYSTEMLESS_7 = new File("/sbin/xposed.prop");
     private static final File XPOSED_PROP_FILE_SYSTEMLESS_OFFICIAL = new File("/su/xposed/xposed.prop");
     private static final File XPOSED_PROP_FILE = new File("/system/xposed.prop");
     public static int WRITE_EXTERNAL_PERMISSION = 69;
@@ -320,6 +321,8 @@ public class XposedApp extends Application implements ActivityLifecycleCallbacks
             file = XPOSED_PROP_FILE_SYSTEMLESS_5;
         } else if (XPOSED_PROP_FILE_SYSTEMLESS_6.canRead()) {
             file = XPOSED_PROP_FILE_SYSTEMLESS_6;
+        } else if (XPOSED_PROP_FILE_SYSTEMLESS_7.canRead()) {
+            file = XPOSED_PROP_FILE_SYSTEMLESS_7;
         }
 
         if (file != null) {
