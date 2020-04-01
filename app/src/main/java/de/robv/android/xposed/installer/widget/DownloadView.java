@@ -4,7 +4,6 @@ import android.Manifest;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.pm.PackageManager;
-import android.os.Build;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.Fragment;
 import android.util.AttributeSet;
@@ -22,7 +21,6 @@ import de.robv.android.xposed.installer.util.DownloadsUtil.DownloadFinishedCallb
 import de.robv.android.xposed.installer.util.DownloadsUtil.DownloadInfo;
 
 import static de.robv.android.xposed.installer.XposedApp.WRITE_EXTERNAL_PERMISSION;
-import static de.robv.android.xposed.installer.XposedApp.getPreferences;
 
 public class DownloadView extends LinearLayout {
     public static Button mClickedButton;
@@ -123,9 +121,7 @@ public class DownloadView extends LinearLayout {
             public void onClick(View v) {
                 mClickedButton = btnDownload;
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && checkPermissions()) return;
-
-                mInfo = DownloadsUtil.add(getContext(), mTitle, mUrl, mCallback, DownloadsUtil.MIME_TYPES.APK);
+                mInfo = DownloadsUtil.addModule(getContext(), mTitle, mUrl, false, mCallback);
                 refreshViewFromUiThread();
 
                 if (mInfo != null)
@@ -141,13 +137,12 @@ public class DownloadView extends LinearLayout {
                 if (checkPermissions())
                     return;
 
-                DownloadsUtil.add(getContext(), mTitle, mUrl, new DownloadFinishedCallback() {
+                mInfo = DownloadsUtil.addModule(getContext(), mTitle, mUrl, true, new DownloadFinishedCallback() {
                     @Override
                     public void onDownloadFinished(Context context, DownloadInfo info) {
-                        Toast.makeText(context, context.getString(R.string.module_saved,
-                                info.localFilename), Toast.LENGTH_SHORT).show();
+                        Toast.makeText(context, context.getString(R.string.module_saved, info.localFilename), Toast.LENGTH_SHORT).show();
                     }
-                }, DownloadsUtil.MIME_TYPES.APK, true, true);
+                });
             }
         });
 

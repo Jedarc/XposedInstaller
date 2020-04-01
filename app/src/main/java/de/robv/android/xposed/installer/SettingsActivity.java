@@ -145,15 +145,15 @@ public class SettingsActivity extends XposedBaseActivity implements ColorChooser
         private Preference.OnPreferenceChangeListener iconChange = new Preference.OnPreferenceChangeListener() {
             @Override
             public boolean onPreferenceChange(Preference preference, Object newValue) {
-                String act = ".WelcomeActivity-";
-                String[] iconsValues = new String[]{"dvdandroid", "hjmodi", "rovo", "rovo-old", "staol"};
+                String act = ".WelcomeActivity";
+                String[] iconsValues = new String[]{"dvdandroid", "hjmodi", "rovo", "rovoold", "staol"};
 
                 Context context = getActivity();
                 PackageManager pm = getActivity().getPackageManager();
                 String packName = getActivity().getPackageName();
 
                 for (String s : iconsValues) {
-                    pm.setComponentEnabledSetting(new ComponentName(context, packName + act + s), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
+                    pm.setComponentEnabledSetting(new ComponentName(packName, packName + act + s), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
                 }
 
                 act += iconsValues[Integer.parseInt((String) newValue)];
@@ -255,7 +255,7 @@ public class SettingsActivity extends XposedBaseActivity implements ColorChooser
 
         @Override
         public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
-            if (key.equals("theme") || key.equals("nav_bar"))
+            if (key.equals("theme") || key.equals("nav_bar") || key.equals("ignore_chinese"))
                 getActivity().recreate();
 
             if (key.equals("force_english"))

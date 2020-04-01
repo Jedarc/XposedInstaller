@@ -360,12 +360,12 @@ public class ModulesFragment extends Fragment implements ModuleListener, Adapter
             }
 
             if (mv != null) {
-                DownloadsUtil.add(getActivity(), m.name, mv.downloadLink, new DownloadsUtil.DownloadFinishedCallback() {
+                DownloadsUtil.addModule(getContext(), m.name, mv.downloadLink, false, new DownloadsUtil.DownloadFinishedCallback() {
                     @Override
                     public void onDownloadFinished(Context context, DownloadsUtil.DownloadInfo info) {
                         new InstallApkUtil(getContext(), info).execute();
                     }
-                }, DownloadsUtil.MIME_TYPES.APK);
+                });
             }
         }
 

@@ -4,6 +4,8 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
+import android.content.DialogInterface;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -18,6 +20,9 @@ import android.support.v7.widget.SwitchCompat;
 import android.text.Html;
 import android.util.Log;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.CompoundButton;
@@ -32,12 +37,18 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 
 import de.robv.android.xposed.installer.R;
 import de.robv.android.xposed.installer.XposedApp;
 import de.robv.android.xposed.installer.util.DownloadsUtil;
 import de.robv.android.xposed.installer.util.InstallApkUtil;
+import de.robv.android.xposed.installer.util.InstallZipUtil;
 import de.robv.android.xposed.installer.util.NavUtil;
+import de.robv.android.xposed.installer.util.RootUtil;
 
 import static de.robv.android.xposed.installer.XposedApp.WRITE_EXTERNAL_PERMISSION;
 
@@ -104,12 +115,20 @@ public class StatusInstallerFragment extends Fragment {
 
         new File(path).delete();
 
-        DownloadsUtil.add(sActivity, "XposedInstaller_by_dvdandroid", mUpdateLink, new DownloadsUtil.DownloadFinishedCallback() {
-            @Override
-            public void onDownloadFinished(Context context, DownloadsUtil.DownloadInfo info) {
-                new InstallApkUtil(context, info).execute();
-            }
-        }, DownloadsUtil.MIME_TYPES.APK, true);
+        new DownloadsUtil.Builder(sActivity)
+                .setTitle("XposedInstaller_by_dvdandroid")
+                .setUrl(mUpdateLink)
+                .setDestinationFromUrl(DownloadsUtil.DOWNLOAD_FRAMEWORK)
+                .setCallback(new DownloadsUtil.DownloadFinishedCallback() {
+                    @Override
+                    public void onDownloadFinished(Context context, DownloadsUtil.DownloadInfo info) {
+                        new InstallApkUtil(context, info).execute();
+                    }
+                })
+                .setMimeType(DownloadsUtil.MIME_TYPES.APK)
+                .setDialog(true)
+                .download();
+
     }
 
     private static boolean checkPermissions() {
@@ -301,27 +320,71 @@ public class StatusInstallerFragment extends Fragment {
         manufacturer.setText(getUIFramework());
         cpu.setText(getCompleteArch());
 
+        determineVerifiedBootState(v);
+
         refreshKnownIssue();
         return v;
+    }
+
+    private void determineVerifiedBootState(View v) {
+        try {
+            Class<?> c = Class.forName("android.os.SystemProperties");
+            Method m = c.getDeclaredMethod("get", String.class, String.class);
+            m.setAccessible(true);
+
+            String propSystemVerified = (String) m.invoke(null, "partition.system.verified", "0");
+            String propState = (String) m.invoke(null, "ro.boot.verifiedbootstate", "");
+            File fileDmVerityModule = new File("/sys/module/dm_verity");
+
+            boolean verified = !propSystemVerified.equals("0");
+            boolean detected = !propState.isEmpty() || fileDmVerityModule.exists();
+
+            TextView tv = v.findViewById(R.id.dmverity);
+            if (verified) {
+                tv.setText(R.string.verified_boot_active);
+                tv.setTextColor(getResources().getColor(R.color.warning));
+            } else if (detected) {
+                tv.setText(R.string.verified_boot_deactivated);
+                v.findViewById(R.id.dmverity_explanation).setVisibility(View.GONE);
+            } else {
+                v.findViewById(R.id.dmverity_row).setVisibility(View.GONE);
+            }
+        } catch (Exception e) {
+            Log.e(XposedApp.TAG, "Could not detect Verified Boot state", e);
+        }
     }
 
     @SuppressLint("StringFormatInvalid")
     private void refreshKnownIssue() {
         String issueName = null;
         String issueLink = null;
+        final ApplicationInfo appInfo = getActivity().getApplicationInfo();
+        final Set<String> missingFeatures = XposedApp.getXposedProp() == null ? new HashSet<String>() : XposedApp.getXposedProp().getMissingInstallerFeatures();
+        final File baseDir = new File(XposedApp.BASE_DIR);
+        final File baseDirCanonical = getCanonicalFile(baseDir);
+        final File baseDirActual = new File(Build.VERSION.SDK_INT >= 24 ? appInfo.deviceProtectedDataDir : appInfo.dataDir);
+        final File baseDirActualCanonical = getCanonicalFile(baseDirActual);
 
-        if (new File("/system/framework/core.jar.jex").exists()) {
+        if (!missingFeatures.isEmpty()) {
+            InstallZipUtil.reportMissingFeatures(missingFeatures);
+            issueName = getString(R.string.installer_needs_update, getString(R.string.app_name));
+            issueLink = getString(R.string.about_support);
+        } else if (new File("/system/framework/core.jar.jex").exists()) {
             issueName = "Aliyun OS";
-            issueLink = "http://forum.xda-developers.com/showpost.php?p=52289793&postcount=5";
-
-        } else if (new File("/data/miui/DexspyInstaller.jar").exists() || checkClassExists("miui.dexspy.DexspyInstaller")) {
+            issueLink = "https://forum.xda-developers.com/showpost.php?p=52289793&postcount=5";
+        } else if (Build.VERSION.SDK_INT < 24 && (new File("/data/miui/DexspyInstaller.jar").exists() || checkClassExists("miui.dexspy.DexspyInstaller"))) {
             issueName = "MIUI/Dexspy";
-            issueLink = "http://forum.xda-developers.com/showpost.php?p=52291098&postcount=6";
-
-        } else if (checkClassExists("com.huawei.android.content.res.ResourcesEx")
-                || checkClassExists("android.content.res.NubiaResources")) {
-            issueName = "Resources subclass";
-            issueLink = "http://forum.xda-developers.com/showpost.php?p=52801382&postcount=8";
+            issueLink = "https://forum.xda-developers.com/showpost.php?p=52291098&postcount=6";
+        } else if (Build.VERSION.SDK_INT < 24 && new File("/system/framework/twframework.jar").exists()) {
+            issueName = "Samsung TouchWiz ROM";
+            issueLink = "https://forum.xda-developers.com/showthread.php?t=3034811";
+        } else if (!baseDirCanonical.equals(baseDirActualCanonical)) {
+            Log.e(XposedApp.TAG, "Base directory: " + getPathWithCanonicalPath(baseDir, baseDirCanonical));
+            Log.e(XposedApp.TAG, "Expected: " + getPathWithCanonicalPath(baseDirActual, baseDirActualCanonical));
+            issueName = getString(R.string.known_issue_wrong_base_directory, getPathWithCanonicalPath(baseDirActual, baseDirActualCanonical));
+        } else if (!baseDir.exists()) {
+            issueName = getString(R.string.known_issue_missing_base_directory);
+            issueLink = "https://github.com/rovo89/XposedInstaller/issues/393";
         }
 
         if (issueName != null) {
@@ -339,6 +402,55 @@ public class StatusInstallerFragment extends Fragment {
         }
     }
 
+    @Override
+    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+        if (Build.VERSION.SDK_INT < 26) {
+            menu.findItem(R.id.dexopt_now).setVisible(false);
+        }
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        switch (item.getItemId()) {
+            case R.id.dexopt_now:
+                new MaterialDialog.Builder(getActivity())
+                        .title(R.string.dexopt_now)
+                        .content(R.string.this_may_take_a_while)
+                        .progress(true, 0)
+                        .cancelable(false)
+                        .showListener(new DialogInterface.OnShowListener() {
+                            @Override
+                            public void onShow(final DialogInterface dialog) {
+                                new Thread("dexopt") {
+                                    @Override
+                                    public void run() {
+                                        RootUtil rootUtil = new RootUtil();
+                                        if (!rootUtil.startShell()) {
+                                            dialog.dismiss();
+                                            NavUtil.showMessage(getActivity(), getString(R.string.root_failed));
+                                            return;
+                                        }
+
+                                        rootUtil.execute("cmd package bg-dexopt-job", new ArrayList<String>());
+
+                                        dialog.dismiss();
+                                        XposedApp.runOnUiThread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                Toast.makeText(getActivity(), R.string.done, Toast.LENGTH_LONG).show();
+                                            }
+                                        });
+                                    }
+                                }.start();
+                            }
+                        }).show();
+                return true;
+        }
+
+        return super.onOptionsItemSelected(item);
+    }
+
+
     private String getAndroidVersion() {
         switch (Build.VERSION.SDK_INT) {
             case 16:
@@ -355,6 +467,9 @@ public class StatusInstallerFragment extends Fragment {
             case 24:
             case 25:
                 return "Nougat";
+            case 26:
+            case 27:
+                return "Oreo";
         }
         return "";
     }
@@ -366,11 +481,30 @@ public class StatusInstallerFragment extends Fragment {
         }
         manufacturer += " " + Build.MODEL + " ";
         if (manufacturer.contains("Samsung")) {
-            manufacturer += new File("/system/framework/twframework.jar").exists() ? "(TouchWiz)" : "(AOSP-based ROM)";
+            manufacturer += new File("/system/framework/twframework.jar").exists() ||
+                    new File("/system/framework/samsung-services.jar").exists()
+                    ? "(TouchWiz)" : "(AOSP-based ROM)";
         } else if (manufacturer.contains("Xiaomi")) {
             manufacturer += new File("/system/framework/framework-miui-res.apk").exists() ? "(MIUI)" : "(AOSP-based ROM)";
         }
         return manufacturer;
+    }
+
+    private File getCanonicalFile(File file) {
+        try {
+            return file.getCanonicalFile();
+        } catch (IOException e) {
+            Log.e(XposedApp.TAG, "Failed to get canonical file for " + file.getAbsolutePath(), e);
+            return file;
+        }
+    }
+
+    private String getPathWithCanonicalPath(File file, File canonical) {
+        if (file.equals(canonical)) {
+            return file.getAbsolutePath();
+        } else {
+            return file.getAbsolutePath() + " \u2192 " + canonical.getAbsolutePath();
+        }
     }
 
     private int extractIntPart(String str) {

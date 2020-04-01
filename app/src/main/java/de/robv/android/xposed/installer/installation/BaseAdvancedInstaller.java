@@ -146,8 +146,10 @@ public class BaseAdvancedInstaller extends Fragment implements DownloadsUtil.Dow
         TextView author = view.findViewById(R.id.author);
         View showOnXda = view.findViewById(R.id.show_on_xda);
 
-        chooserInstallers.setAdapter(new XposedZip.MyAdapter(getContext(), installers()));
-        chooserUninstallers.setAdapter(new XposedZip.MyAdapter(getContext(), uninstallers()));
+        try {
+            chooserInstallers.setAdapter(new XposedZip.MyAdapter(getContext(), installers()));
+            chooserUninstallers.setAdapter(new XposedZip.MyAdapter(getContext(), uninstallers()));
+        } catch (Exception ignored) {}
 
         if (Build.VERSION.SDK_INT >= 21 && installers().size() >= 3 && uninstallers().size() >= 4) {
             if (StatusInstallerFragment.ARCH.contains("86")) {
@@ -186,7 +188,7 @@ public class BaseAdvancedInstaller extends Fragment implements DownloadsUtil.Dow
             }
         });
 
-        View.OnClickListener btnClick = new View.OnClickListener() {
+        btnInstall.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 mClickedButton = v;
@@ -213,20 +215,48 @@ public class BaseAdvancedInstaller extends Fragment implements DownloadsUtil.Dow
                             }
                         });
             }
-        };
+        });
 
-        btnInstall.setOnClickListener(btnClick);
-        btnUninstall.setOnClickListener(btnClick);
+        btnUninstall.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                mClickedButton = v;
+                if (checkPermissions()) return;
+
+                areYouSure(R.string.warningArchitecture,
+                        new MaterialDialog.ButtonCallback() {
+                            @Override
+                            public void onPositive(MaterialDialog dialog) {
+                                super.onPositive(dialog);
+
+                                XposedZip selectedUninstaller = (XposedZip) chooserUninstallers.getSelectedItem();
+
+                                checkAndDelete(selectedUninstaller.name);
+
+                                new DownloadsUtil.Builder(getContext())
+                                        .setTitle(selectedUninstaller.name)
+                                        .setUrl(selectedUninstaller.link)
+                                        .setSave(true)
+                                        .setCallback(BaseAdvancedInstaller.this)
+                                        .setMimeType(DownloadsUtil.MIME_TYPES.ZIP)
+                                        .setDialog(true)
+                                        .download();
+                            }
+                        });
+            }
+        });
 
         compatibleTv.setText(compatibility());
         incompatibleTv.setText(incompatibility());
         author.setText(getString(R.string.download_author, author()));
 
-        if (uninstallers().size() == 0) {
-            infoUninstaller.setVisibility(View.GONE);
-            chooserUninstallers.setVisibility(View.GONE);
-            btnUninstall.setVisibility(View.GONE);
-        }
+        try {
+            if (uninstallers().size() == 0) {
+                infoUninstaller.setVisibility(View.GONE);
+                chooserUninstallers.setVisibility(View.GONE);
+                btnUninstall.setVisibility(View.GONE);
+            }
+        } catch (Exception ignored) {}
 
         if (!isStable()) {
             view.findViewById(R.id.warning_unstable).setVisibility(View.VISIBLE);
@@ -309,7 +339,7 @@ public class BaseAdvancedInstaller extends Fragment implements DownloadsUtil.Dow
                     }
                 });
                 return;
-            } else if (InstallZipUtil.checkZip(info.localFilename).isFlashableInApp()) {
+            } else if (InstallZipUtil.checkZip(InstallZipUtil.getZip(info.localFilename)).isFlashableInApp()) {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -532,30 +562,9 @@ public class BaseAdvancedInstaller extends Fragment implements DownloadsUtil.Dow
             mRootUtil.executeWithBusybox("sync", messages);
         }
 
-        if (mRootUtil.execute("ls /cache/recovery") != 0) {
-            messages.add(getString(R.string.file_creating_directory, "/cache/recovery"));
-            if (mRootUtil.executeWithBusybox("mkdir /cache/recovery",
-                    messages) != 0) {
-                messages.add("");
-                messages.add(getString(R.string.file_create_directory_failed, "/cache/recovery"));
-                return false;
-            }
-        }
-
-        messages.add(getString(R.string.file_copying, file));
-
-        if (mRootUtil.executeWithBusybox("cp -a " + file.getAbsolutePath() + " /cache/recovery/", messages) != 0) {
-            messages.add("");
-            messages.add(getString(R.string.file_copy_failed, file, "/cache"));
-            return false;
-        }
-
-        messages.add(getString(R.string.file_writing_recovery_command));
-        if (mRootUtil.execute("echo --update_package=/cache/recovery/" + file.getName() + " > /cache/recovery/command", messages) != 0) {
-            messages.add("");
-            messages.add(getString(R.string.file_writing_recovery_command_failed));
-            return false;
-        }
+        Intent install = new Intent(getContext(), InstallationActivity.class);
+        install.putExtra(Flashable.KEY, new FlashRecoveryAuto(file.getAbsoluteFile()));
+        startActivity(install);
 
         return true;
     }

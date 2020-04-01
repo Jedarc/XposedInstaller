@@ -275,7 +275,6 @@
     <string name="support_xda">Bekomme Unterstützung im XDA-Thread</string>
     <string name="android_sdk">Android %1$s %2$s (API %3$d)</string>
     <string name="later">Später</string>
-    <string name="original_framework">Dein Gerät ist kompatibel mit dem offiziellen Xposed Framework.</string>
     <string name="save">Speichern</string>
     <string name="download_location">Speicherort für Downloads</string>
     <string name="download_location_summ">Speicherort für APK Dateien (nur Module)</string>
@@ -283,5 +282,13 @@
     <string name="cache_cleaned">Der Cache der App wurde geleert. Neustart wird benötigt</string>
     <string name="update_download_list">Die Liste der Module wird gleich aktualisiert</string>
     <string name="no_connection_available">Keine Verbindung verfügbar</string>
+
+    <string name="dexopt_now">Apps jetzt optimieren</string>
+    <string name="this_may_take_a_while">Das kann eine Weile dauern.</string>
+    <string name="done">Fertig!</string>
+    <string name="not_now">Nicht jetzt</string>
+    <string name="verified_boot_deactivated">Verified Boot ist deaktiviert</string>
+    <string name="verified_boot_active">Verified Boot ist aktiv</string>
+    <string name="verified_boot_explanation">Verified Boot (dm-verity) verhindert das Booten des Geräts, falls die System-Partition modifiziert ist.\n<b>Es wird nicht empfohlen, Xposed zu installieren!</b></string>
 
 </resources>

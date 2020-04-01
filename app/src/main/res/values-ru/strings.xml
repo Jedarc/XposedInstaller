@@ -67,7 +67,7 @@
     <!-- Modules tab -->
     <string name="module_is_not_activated_yet">Xposed модуль еще не активирован</string>
     <string name="module_is_not_activated_yet_detailed">%s был установлен но не активирован.</string>
-    <string name="activate_and_reboot">Перезагрузить</string>
+    <string name="activate_and_reboot">Вкл. и перезагрузить</string>
     <string name="activate_only">Включить</string>
     <string name="module_activated">Модуль Xposed был активирован</string>
     <string name="module_empty_description">(описание отсутствует)</string>
@@ -155,7 +155,7 @@
     <string name="log_is_empty">Список логов пуст</string>
 
     <!-- About tab -->
-    <string name="about_developers_label">Главные разработчики</string>
+    <string name="about_developers_label">О разработчиках</string>
     <string name="about_developers"><a href="http://forum.xda-developers.com/member.php?u=4419114">rovo89</a> и <a href="http://forum.xda-developers.com/member.php?u=4322181">Tungstwenty</a>\n<a href="http://forum.xda-developers.com/member.php?u=4756862">-BioHaZard-</a> и <a href="http://forum.xda-developers.com/member.php?u=5345056">dvdandroid</a> Для исправления багов и Material Дизайна</string>
     <string name="about_translator_label">Переводчик:</string>
     <string name="translator">4pda: Alexey711</string>
@@ -295,19 +295,32 @@
     <string name="flash_error_not_flashable_in_app">Этот файл можно прошить только через рекавери</string>
     <string name="flash_error_default">Произошла %d ошибка</string>
     <string name="installation_error">Ошибка установки</string>
-    <string name="installation_successful">Установка выполнена успешно</string>
-    <string name="installation_successful_message">%s успешно установлено</string>
-    <string name="installation_error_message">%1$s cбой установки (%2$s)</string>
+    <string name="installation_successful">Установка завершена</string>
+    <string name="installation_successful_message">%s успешно установлен</string>
+    <string name="installation_error_message">%1$s сбой установки (%2$s)</string>
     <string name="installation_apk_normal">Нормальная установка APK</string>
     <string name="install_load">Установка…</string>
     <string name="install_load_apk">Установка %s</string>
 
-    <string name="rovo89_summary">Главный создатель Xposed</string>
-    <string name="tungstwenty_summary">Помогло с его большим вкладом, как в коде, так и в мыслях</string>
-    <string name="dvdandroid_summary">Создатель этого Xposed Installer</string>
-    <string name="biohazard_summary">Помогли с реализацией Material Design</string>
+    <string name="rovo89_summary">Главный разработчик Xposed</string>
+    <string name="tungstwenty_summary">Помог с большим вкладом, как в коде, так и мыслями</string>
+    <string name="dvdandroid_summary">Разработчик мода Xposed Installer</string>
+    <string name="biohazard_summary">Помог с реализацией Material Design</string>
     <string name="unstable_build">Это нестабильная сборка. Ставите ее на свой страх и риск.</string>
     <string name="alt_download_method">Альтернативный способ загрузки</string>
-    <string name="alt_download_method_summ">Включите тут, если вы получите проблемы при загрузке модуля</string>
-    <string name="original_framework">Ваше устройство совместимо с официальным Xposed Framework.</string>
+    <string name="alt_download_method_summ">Включайте если получаете проблемы при загрузке модулей</string>
+
+    <string name="known_issue_wrong_base_directory">Основной каталог ошибочный: %1$s</string>
+    <string name="known_issue_missing_base_directory">Основной каталог отсутсвует</string>
+    <string name="installer_needs_update">%1$s необходимо обновить</string>
+
+    <string name="dexopt_now">Оптимизация приложений</string>
+    <string name="this_may_take_a_while">Это займет некоторое время.</string>
+    <string name="done">Готово!</string>
+    <string name="verified_boot_deactivated">Проверка загрузки отключена</string>
+    <string name="verified_boot_active">Проверка загрузки включена</string>
+    <string name="verified_boot_explanation">Проверка загрузки (dm-verity) предотвращает загрузку устройства, если системный раздел изменен.\n<b>Установка Xposed не рекомендуется!</b></string>
+    <string name="ignore_chinese">Китайские иероглифы</string>
+    <string name="ignore_chinese_summary">Скрыть китайские модули в \"Поиск модулей\". Модули по-прежнему доступны через иконку поиска. Включение настройки может привести к низкой производительности.</string>
+
 </resources>

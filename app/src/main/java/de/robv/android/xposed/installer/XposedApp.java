@@ -5,7 +5,10 @@ import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.Application;
 import android.app.Application.ActivityLifecycleCallbacks;
+import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
@@ -32,6 +35,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.lang.reflect.Method;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -39,6 +43,7 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import de.robv.android.xposed.installer.receivers.PackageChangeReceiver;
 import de.robv.android.xposed.installer.util.AssetUtil;
 import de.robv.android.xposed.installer.util.InstallZipUtil;
 import de.robv.android.xposed.installer.util.ModuleUtil;
@@ -49,13 +54,17 @@ public class XposedApp extends Application implements ActivityLifecycleCallbacks
     public static final String TAG = "XposedInstaller";
 
     @SuppressLint("SdCardPath")
-    public static final String BASE_DIR = "/data/data/de.robv.android.xposed.installer/";
+    private static final String BASE_DIR_LEGACY = "/data/data/de.robv.android.xposed.installer/";
+    public static final String BASE_DIR = Build.VERSION.SDK_INT >= 24
+            ? "/data/user_de/0/de.robv.android.xposed.installer/" : BASE_DIR_LEGACY;
     public static final String ENABLED_MODULES_LIST_FILE = XposedApp.BASE_DIR + "conf/enabled_modules.list";
     private static final File XPOSED_PROP_FILE_SYSTEMLESS_1 = new File("/magisk/xposed/system/xposed.prop");
     private static final File XPOSED_PROP_FILE_SYSTEMLESS_2 = new File("/su/xposed/system/xposed.prop");
     private static final File XPOSED_PROP_FILE_SYSTEMLESS_3 = new File("/vendor/xposed.prop");
     private static final File XPOSED_PROP_FILE_SYSTEMLESS_4 = new File("/xposed/xposed.prop");
     private static final File XPOSED_PROP_FILE_SYSTEMLESS_5 = new File("/magisk/PurifyXposed/system/xposed.prop");
+    private static final File XPOSED_PROP_FILE_SYSTEMLESS_6 = new File("/xposed.prop");
+    private static final File XPOSED_PROP_FILE_SYSTEMLESS_7 = new File("/sbin/xposed.prop");
     private static final File XPOSED_PROP_FILE_SYSTEMLESS_OFFICIAL = new File("/su/xposed/xposed.prop");
     private static final File XPOSED_PROP_FILE = new File("/system/xposed.prop");
     public static int WRITE_EXTERNAL_PERMISSION = 69;
@@ -65,9 +74,9 @@ public class XposedApp extends Application implements ActivityLifecycleCallbacks
     private static Thread mUiThread;
     private static Handler mMainHandler;
     private boolean mIsUiLoaded = false;
-    private Activity mCurrentActivity = null;
     private SharedPreferences mPref;
     private InstallZipUtil.XposedProp mXposedProp;
+    private Activity mCurrentActivity = null;
 
     public static XposedApp getInstance() {
         return mInstance;
@@ -148,8 +157,7 @@ public class XposedApp extends Application implements ActivityLifecycleCallbacks
         return prefs.getInt("colors", defaultColor);
     }
 
-    public static void setColors(ActionBar actionBar, Object value,
-                                 Activity activity) {
+    public static void setColors(ActionBar actionBar, Object value, Activity activity) {
         int color = (int) value;
         SharedPreferences prefs = activity.getSharedPreferences(activity.getPackageName() + "_preferences", MODE_PRIVATE);
 
@@ -222,6 +230,7 @@ public class XposedApp extends Application implements ActivityLifecycleCallbacks
         delete(new File(Environment.getExternalStorageDirectory() + "/XposedInstaller/.temp"));
         NotificationUtil.init();
         AssetUtil.removeBusybox();
+        registerReceivers();
 
         registerActivityLifecycleCallbacks(this);
 
@@ -246,18 +255,43 @@ public class XposedApp extends Application implements ActivityLifecycleCallbacks
         }
     }
 
-    private void delete(File file){
-        if (file.isDirectory()) {
-            for (File f : file.listFiles())
-                delete(f);
+    private void registerReceivers() {
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_PACKAGE_ADDED);
+        filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
+        filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        filter.addDataScheme("package");
+        registerReceiver(new PackageChangeReceiver(), filter);
+
+        PendingIntent.getBroadcast(this, 0,
+                new Intent(this, PackageChangeReceiver.class), 0);
+    }
+
+    private void delete(File file) {
+        if (file != null) {
+            if (file.isDirectory()) {
+                File[] files = file.listFiles();
+                if (files != null) for (File f : file.listFiles()) delete(f);
+            }
+            file.delete();
         }
-        file.delete();
     }
 
     private void createDirectories() {
-        mkdirAndChmod("bin", 00771);
+        FileUtils.setPermissions(BASE_DIR, 00711, -1, -1);
         mkdirAndChmod("conf", 00771);
         mkdirAndChmod("log", 00777);
+
+        if (Build.VERSION.SDK_INT >= 24) {
+            try {
+                Method deleteDir = FileUtils.class.getDeclaredMethod("deleteContentsAndDir", File.class);
+                deleteDir.invoke(null, new File(BASE_DIR_LEGACY, "bin"));
+                deleteDir.invoke(null, new File(BASE_DIR_LEGACY, "conf"));
+                deleteDir.invoke(null, new File(BASE_DIR_LEGACY, "log"));
+            } catch (ReflectiveOperationException e) {
+                Log.w(XposedApp.TAG, "Failed to delete obsolete directories", e);
+            }
+        }
     }
 
     private void mkdirAndChmod(String dir, int permissions) {
@@ -285,6 +319,10 @@ public class XposedApp extends Application implements ActivityLifecycleCallbacks
             file = XPOSED_PROP_FILE_SYSTEMLESS_4;
         } else if (XPOSED_PROP_FILE_SYSTEMLESS_5.canRead()) {
             file = XPOSED_PROP_FILE_SYSTEMLESS_5;
+        } else if (XPOSED_PROP_FILE_SYSTEMLESS_6.canRead()) {
+            file = XPOSED_PROP_FILE_SYSTEMLESS_6;
+        } else if (XPOSED_PROP_FILE_SYSTEMLESS_7.canRead()) {
+            file = XPOSED_PROP_FILE_SYSTEMLESS_7;
         }
 
         if (file != null) {
@@ -355,8 +393,7 @@ public class XposedApp extends Application implements ActivityLifecycleCallbacks
     }
 
     @Override
-    public void onActivitySaveInstanceState(Activity activity,
-                                            Bundle outState) {
+    public void onActivitySaveInstanceState(Activity activity, Bundle outState) {
     }
 
     @Override

@@ -3,16 +3,17 @@ package de.robv.android.xposed.installer.util;
 import android.app.DownloadManager;
 import android.app.DownloadManager.Query;
 import android.app.DownloadManager.Request;
-import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
-import android.os.Build;
+import android.os.Environment;
 import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.annotation.UiThread;
+import android.support.v4.content.ContextCompat;
+import android.support.v4.os.EnvironmentCompat;
 import android.util.Log;
 import android.view.View;
 import android.widget.Toast;
@@ -28,7 +29,6 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
-import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -41,8 +41,6 @@ import de.robv.android.xposed.installer.repo.Module;
 import de.robv.android.xposed.installer.repo.ModuleVersion;
 import de.robv.android.xposed.installer.repo.ReleaseType;
 
-import static de.robv.android.xposed.installer.XposedApp.getPreferences;
-
 public class DownloadsUtil {
     public static final String MIME_TYPE_APK = "application/vnd.android.package-archive";
     public static final String MIME_TYPE_ZIP = "application/zip";
@@ -51,27 +49,8 @@ public class DownloadsUtil {
     private static final SharedPreferences mPref = mApp
             .getSharedPreferences("download_cache", Context.MODE_PRIVATE);
 
-    @Deprecated
-    public static DownloadInfo add(Context context, String title, String url, DownloadFinishedCallback callback, MIME_TYPES mimeType) {
-        return add(context, title, url, callback, mimeType, false, false);
-    }
-
-    @Deprecated
-    public static DownloadInfo add(Context context, String title, String url, DownloadFinishedCallback callback, MIME_TYPES mimeType, boolean save) {
-        return add(context, title, url, callback, mimeType, save, false);
-    }
-
-    @Deprecated
-    public static DownloadInfo add(Context context, String title, String url, DownloadFinishedCallback callback, MIME_TYPES mimeType, boolean save, boolean module) {
-        return new Builder(context)
-                .setTitle(title)
-                .setUrl(url)
-                .setCallback(callback)
-                .setMimeType(mimeType)
-                .setSave(save)
-                .setModule(module)
-                .download();
-    }
+    public static String DOWNLOAD_FRAMEWORK = "framework";
+    public static String DOWNLOAD_MODULES = "modules";
 
     private static DownloadInfo add(Builder b) {
         Context context = b.mContext;
@@ -79,7 +58,7 @@ public class DownloadsUtil {
 
         if (!b.mDialog) {
             synchronized (mCallbacks) {
-                mCallbacks.put(b.mTitle, b.mCallback);
+                mCallbacks.put(b.mUrl, b.mCallback);
             }
         }
 
@@ -88,25 +67,21 @@ public class DownloadsUtil {
             savePath += "/modules";
         }
 
-        if (!b.mSave && (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N || getPreferences().getBoolean("alt_download", false))) {
-            b.mSave = true;
-            savePath += "/.temp";
-        }
-
         Request request = new Request(Uri.parse(b.mUrl));
         request.setTitle(b.mTitle);
         request.setMimeType(b.mMimeType.toString());
-        if (b.mDestination != null) {
-            b.mDestination.getParentFile().mkdirs();
-            removeAllForLocalFile(context, b.mDestination);
-            request.setDestinationUri(Uri.fromFile(b.mDestination));
-        } else if (b.mSave) {
+        if (b.mSave) {
             try {
                 request.setDestinationInExternalPublicDir(savePath, b.mTitle + b.mMimeType.getExtension());
             } catch (IllegalStateException e) {
                 Toast.makeText(context, e.getMessage(), Toast.LENGTH_SHORT).show();
             }
+        } else if (b.mDestination != null) {
+            b.mDestination.getParentFile().mkdirs();
+            removeAllForLocalFile(context, b.mDestination);
+            request.setDestinationUri(Uri.fromFile(b.mDestination));
         }
+
         request.setNotificationVisibility(Request.VISIBILITY_VISIBLE);
 
         DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
@@ -117,6 +92,105 @@ public class DownloadsUtil {
         }
 
         return getById(context, id);
+    }
+
+    public static File[] getDownloadDirs(String subDir) {
+        Context context = XposedApp.getInstance();
+        ArrayList<File> dirs = new ArrayList<>(2);
+        for (File dir : ContextCompat.getExternalCacheDirs(context)) {
+            if (dir != null && EnvironmentCompat.getStorageState(dir).equals(Environment.MEDIA_MOUNTED)) {
+                dirs.add(new File(new File(dir, "downloads"), subDir));
+            }
+        }
+        dirs.add(new File(new File(context.getCacheDir(), "downloads"), subDir));
+        return dirs.toArray(new File[dirs.size()]);
+    }
+
+    public static File getDownloadTarget(String subDir, String filename) {
+        return new File(getDownloadDirs(subDir)[0], filename);
+    }
+
+    public static File getDownloadTargetForUrl(String subDir, String url) {
+        return getDownloadTarget(subDir, Uri.parse(url).getLastPathSegment());
+    }
+
+    public static DownloadInfo addModule(Context context, String title, String url, boolean save, DownloadFinishedCallback callback) {
+        return new Builder(context)
+                .setTitle(title)
+                .setUrl(url)
+                .setDestinationFromUrl(DownloadsUtil.DOWNLOAD_MODULES)
+                .setCallback(callback)
+                .setSave(save)
+                .setModule(true)
+                .setMimeType(MIME_TYPES.APK)
+                .download();
+    }
+
+    public static class Builder {
+        private final Context mContext;
+        private String mTitle = null;
+        private String mUrl = null;
+        private DownloadFinishedCallback mCallback = null;
+        private MIME_TYPES mMimeType = MIME_TYPES.APK;
+        private File mDestination = null;
+        private boolean mDialog = false;
+        public boolean mModule = false;
+        private boolean mSave = false;
+
+        public Builder(Context context) {
+            mContext = context;
+        }
+
+        public Builder setTitle(String title) {
+            mTitle = title;
+            return this;
+        }
+
+        public Builder setUrl(String url) {
+            mUrl = url;
+            return this;
+        }
+
+        public Builder setCallback(DownloadFinishedCallback callback) {
+            mCallback = callback;
+            return this;
+        }
+
+        public Builder setMimeType(MIME_TYPES mimeType) {
+            mMimeType = mimeType;
+            return this;
+        }
+
+        public Builder setDestination(File file) {
+            mDestination = file;
+            return this;
+        }
+
+        public Builder setDestinationFromUrl(String subDir) {
+            if (mUrl == null) {
+                throw new IllegalStateException("URL must be set first");
+            }
+            return setDestination(getDownloadTargetForUrl(subDir, mUrl));
+        }
+
+        public Builder setSave(boolean save) {
+            this.mSave = save;
+            return this;
+        }
+
+        public Builder setModule(boolean module) {
+            this.mModule = module;
+            return this;
+        }
+
+        public Builder setDialog(boolean dialog) {
+            mDialog = dialog;
+            return this;
+        }
+
+        public DownloadInfo download() {
+            return add(this);
+        }
     }
 
     private static void showDownloadDialog(final Builder b, final long id) {
@@ -169,7 +243,7 @@ public class DownloadsUtil {
                             }
                         });
                         return;
-                    }  else if (info.status == DownloadManager.STATUS_SUCCESSFUL) {
+                    } else if (info.status == DownloadManager.STATUS_SUCCESSFUL) {
                         dialog.dismiss();
                         // Hack to reset stat information.
                         new File(info.localFilename).setExecutable(false);
@@ -198,6 +272,20 @@ public class DownloadsUtil {
         }.start();
     }
 
+    private static class DownloadDialog extends MaterialDialog {
+        public DownloadDialog(Builder builder) {
+            super(builder);
+        }
+
+        @UiThread
+        public void setShowProcess(boolean show) {
+            int visibility = show ? View.VISIBLE : View.GONE;
+            mProgress.setVisibility(visibility);
+            mProgressLabel.setVisibility(visibility);
+            mProgressMinMax.setVisibility(visibility);
+        }
+    }
+
     public static ModuleVersion getStableVersion(Module m) {
         for (int i = 0; i < m.versions.size(); i++) {
             ModuleVersion mvTemp = m.versions.get(i);
@@ -219,21 +307,21 @@ public class DownloadsUtil {
 
         int columnUri = c.getColumnIndexOrThrow(DownloadManager.COLUMN_URI);
         int columnTitle = c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE);
-        int columnLastMod = c.getColumnIndexOrThrow(DownloadManager.COLUMN_LAST_MODIFIED_TIMESTAMP);
-        int columnFilename = c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI);
+        int columnLastMod = c.getColumnIndexOrThrow(
+                DownloadManager.COLUMN_LAST_MODIFIED_TIMESTAMP);
+        int columnLocalUri = c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI);
         int columnStatus = c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS);
         int columnTotalSize = c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES);
         int columnBytesDownloaded = c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR);
         int columnReason = c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON);
 
         int status = c.getInt(columnStatus);
-        String localFilename = c.getString(columnFilename);
-        if (localFilename != null) {
-            localFilename = localFilename.replace("file://", "");
-            localFilename = URLDecoder.decode(localFilename);
-            if (localFilename.startsWith("content")) {
-                localFilename = queryName(context.getContentResolver(), Uri.parse(localFilename));
-            }
+        String localFilename;
+        try {
+            localFilename = getFilenameFromUri(c.getString(columnLocalUri));
+        } catch (UnsupportedOperationException e) {
+            Toast.makeText(context, "An error occurred. Restart app and try again.\n" + e.getMessage(), Toast.LENGTH_SHORT).show();
+            return null;
         }
         if (status == DownloadManager.STATUS_SUCCESSFUL && !new File(localFilename).isFile()) {
             dm.remove(id);
@@ -247,18 +335,29 @@ public class DownloadsUtil {
                 c.getInt(columnTotalSize), c.getInt(columnBytesDownloaded),
                 c.getInt(columnReason));
         c.close();
-
         return info;
     }
 
-    public static List<DownloadInfo> getAllForUrl(Context context, String url) {
-        DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+    public static DownloadInfo getLatestForUrl(Context context, String url) {
+        List<DownloadInfo> all;
+        try {
+            all = getAllForUrl(context, url);
+        } catch (Throwable throwable) {
+            return null;
+        }
+        return all.isEmpty() ? null : all.get(0);
+    }
+
+    public static List<DownloadInfo> getAllForUrl(Context context, String url)throws Throwable {
+        DownloadManager dm = (DownloadManager) context
+                .getSystemService(Context.DOWNLOAD_SERVICE);
         Cursor c = dm.query(new Query());
         int columnId = c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID);
         int columnUri = c.getColumnIndexOrThrow(DownloadManager.COLUMN_URI);
         int columnTitle = c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE);
-        int columnLastMod = c.getColumnIndexOrThrow(DownloadManager.COLUMN_LAST_MODIFIED_TIMESTAMP);
-        int columnFilename = c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI);
+        int columnLastMod = c.getColumnIndexOrThrow(
+                DownloadManager.COLUMN_LAST_MODIFIED_TIMESTAMP);
+        int columnLocalUri = c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI);
         int columnStatus = c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS);
         int columnTotalSize = c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES);
         int columnBytesDownloaded = c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR);
@@ -270,13 +369,12 @@ public class DownloadsUtil {
                 continue;
 
             int status = c.getInt(columnStatus);
-            String localFilename = c.getString(columnFilename);
-            if (localFilename != null) {
-                localFilename = localFilename.replace("file://", "");
-                localFilename = URLDecoder.decode(localFilename);
-                if (localFilename.startsWith("content")) {
-                    localFilename = queryName(context.getContentResolver(), Uri.parse(localFilename));
-                }
+            String localFilename;
+            try {
+                localFilename = getFilenameFromUri(c.getString(columnLocalUri));
+            } catch (UnsupportedOperationException e) {
+                Toast.makeText(context, "An error occurred. Restart app and try again.\n" + e.getMessage(), Toast.LENGTH_SHORT).show();
+                return null;
             }
             if (status == DownloadManager.STATUS_SUCCESSFUL && !new File(localFilename).isFile()) {
                 dm.remove(c.getLong(columnId));
@@ -293,54 +391,6 @@ public class DownloadsUtil {
 
         Collections.sort(downloads);
         return downloads;
-    }
-
-    public static DownloadInfo getLatestForUrl(Context context, String url) {
-        List<DownloadInfo> all = getAllForUrl(context, url);
-        return all.isEmpty() ? null : all.get(0);
-    }
-
-    public static void removeAllForLocalFile(Context context, File file) {
-        file.delete();
-
-        String filename;
-        try {
-            filename = file.getCanonicalPath();
-        } catch (IOException e) {
-            Log.w(XposedApp.TAG, "Could not resolve path for " + file.getAbsolutePath(), e);
-            return;
-        }
-
-        DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-        Cursor c = dm.query(new Query());
-        int columnId = c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID);
-        int columnFilename = c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI);
-
-        List<Long> idsList = new ArrayList<>(1);
-        while (c.moveToNext()) {
-            String itemFilename = c.getString(columnFilename);
-            if (itemFilename != null) {
-                if (filename.equals(itemFilename)) {
-                    idsList.add(c.getLong(columnId));
-                } else {
-                    try {
-                        if (filename.equals(new File(itemFilename).getCanonicalPath())) {
-                            idsList.add(c.getLong(columnId));
-                        }
-                    } catch (IOException ignored) {}
-                }
-            }
-        }
-        c.close();
-
-        if (idsList.isEmpty())
-            return;
-
-        long ids[] = new long[idsList.size()];
-        for (int i = 0; i < ids.length; i++)
-            ids[i] = idsList.get(i);
-
-        dm.remove(ids);
     }
 
     public static void removeById(Context context, long id) {
@@ -371,14 +421,78 @@ public class DownloadsUtil {
         dm.remove(ids);
     }
 
-    private static String queryName(ContentResolver resolver, Uri uri) {
-        Cursor returnCursor = resolver.query(uri, null, null, null, null);
-        assert returnCursor != null;
-        int nameIndex = returnCursor.getColumnIndex(MediaStore.Files.FileColumns.DATA);
-        returnCursor.moveToFirst();
-        String name = returnCursor.getString(nameIndex);
-        returnCursor.close();
-        return name;
+    public static void removeAllForLocalFile(Context context, File file) {
+        file.delete();
+
+        String filename;
+        try {
+            filename = file.getCanonicalPath();
+        } catch (IOException e) {
+            Log.w(XposedApp.TAG, "Could not resolve path for " + file.getAbsolutePath(), e);
+            return;
+        }
+
+        DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+        Cursor c = dm.query(new Query());
+        int columnId = c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID);
+        int columnLocalUri = c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI);
+
+        List<Long> idsList = new ArrayList<>(1);
+        while (c.moveToNext()) {
+            String itemFilename;
+            try {
+                itemFilename = getFilenameFromUri(c.getString(columnLocalUri));
+            } catch (UnsupportedOperationException e) {
+                Toast.makeText(context, "An error occurred. Restart app and try again.\n" + e.getMessage(), Toast.LENGTH_SHORT).show();
+                itemFilename = null;
+            }
+            if (itemFilename != null) {
+                if (filename.equals(itemFilename)) {
+                    idsList.add(c.getLong(columnId));
+                } else {
+                    try {
+                        if (filename.equals(new File(itemFilename).getCanonicalPath())) {
+                            idsList.add(c.getLong(columnId));
+                        }
+                    } catch (IOException ignored) {
+                    }
+                }
+            }
+        }
+        c.close();
+
+        if (idsList.isEmpty())
+            return;
+
+        long ids[] = new long[idsList.size()];
+        for (int i = 0; i < ids.length; i++)
+            ids[i] = idsList.get(i);
+
+        dm.remove(ids);
+    }
+
+    public static void removeOutdated(Context context, long cutoff) {
+        DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+        Cursor c = dm.query(new Query());
+        int columnId = c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID);
+        int columnLastMod = c.getColumnIndexOrThrow(
+                DownloadManager.COLUMN_LAST_MODIFIED_TIMESTAMP);
+
+        List<Long> idsList = new ArrayList<>();
+        while (c.moveToNext()) {
+            if (c.getLong(columnLastMod) < cutoff)
+                idsList.add(c.getLong(columnId));
+        }
+        c.close();
+
+        if (idsList.isEmpty())
+            return;
+
+        long ids[] = new long[idsList.size()];
+        for (int i = 0; i < ids.length; i++)
+            ids[i] = idsList.get(0);
+
+        dm.remove(ids);
     }
 
     public static void triggerDownloadFinishedCallback(Context context, long id) {
@@ -388,7 +502,7 @@ public class DownloadsUtil {
 
         DownloadFinishedCallback callback;
         synchronized (mCallbacks) {
-            callback = mCallbacks.get(info.title);
+            callback = mCallbacks.get(info.url);
         }
 
         if (callback == null)
@@ -397,6 +511,30 @@ public class DownloadsUtil {
         // Hack to reset stat information.
         new File(info.localFilename).setExecutable(false);
         callback.onDownloadFinished(context, info);
+    }
+
+    private static String getFilenameFromUri(String uriString) {
+        if (uriString == null) {
+            return null;
+        }
+        Uri uri = Uri.parse(uriString);
+        if (uri.getScheme().equals("file")) {
+            return uri.getPath();
+        } else if (uri.getScheme().equals("content")) {
+            Context context = XposedApp.getInstance();
+            Cursor c = null;
+            try {
+                c = context.getContentResolver().query(uri, new String[]{MediaStore.Files.FileColumns.DATA}, null, null, null);
+                c.moveToFirst();
+                return c.getString(c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA));
+            } finally {
+                if (c != null) {
+                    c.close();
+                }
+            }
+        } else {
+            throw new UnsupportedOperationException("Unexpected URI: " + uriString);
+        }
     }
 
     public static SyncDownloadInfo downloadSynchronously(String url, File target) {
@@ -524,95 +662,16 @@ public class DownloadsUtil {
         void onDownloadFinished(Context context, DownloadInfo info);
     }
 
-    public static class Builder {
-        private final Context mContext;
-        private String mTitle = null;
-        private String mUrl = null;
-        private DownloadFinishedCallback mCallback = null;
-        private MIME_TYPES mMimeType = MIME_TYPES.APK;
-        private boolean mSave = false;
-        private File mDestination = null;
-        private boolean mModule = false;
-        private boolean mDialog = false;
-
-        public Builder(Context context) {
-            mContext = context;
-        }
-
-        public Builder setTitle(String title) {
-            mTitle = title;
-            return this;
-        }
-
-        public Builder setUrl(String url) {
-            mUrl = url;
-            return this;
-        }
-
-        public Builder setCallback(DownloadFinishedCallback callback) {
-            mCallback = callback;
-            return this;
-        }
-
-        public Builder setMimeType(MIME_TYPES mimeType) {
-            mMimeType = mimeType;
-            return this;
-        }
-
-        public Builder setSave(boolean save) {
-            mSave = save;
-            return this;
-        }
-
-        public Builder setDestination(File file) {
-            mDestination = file;
-            return this;
-        }
-
-        public Builder setModule(boolean module) {
-            mModule = module;
-            return this;
-        }
-
-        public Builder setDialog(boolean dialog) {
-            mDialog = dialog;
-            return this;
-        }
-
-        public DownloadInfo download() {
-            return add(this);
-        }
-    }
-
-    private static class DownloadDialog extends MaterialDialog {
-        public DownloadDialog(Builder builder) {
-            super(builder);
-        }
-
-        @UiThread
-        public void setShowProcess(boolean show) {
-            int visibility = show ? View.VISIBLE : View.GONE;
-            mProgress.setVisibility(visibility);
-            mProgressLabel.setVisibility(visibility);
-            mProgressMinMax.setVisibility(visibility);
-        }
-    }
-
     public static class DownloadInfo implements Comparable<DownloadInfo> {
-        public long id;
-        public String url;
-        public String title;
-        public long lastModification;
-        public String localFilename;
-        public int status;
-        public int totalSize;
-        public int bytesDownloaded;
-        public int reason;
-
-        public DownloadInfo(File file) {
-            this.title = file.getName().replace(".zip", "");
-            this.localFilename = file.getAbsolutePath();
-        }
+        public final long id;
+        public final String url;
+        public final String title;
+        public final long lastModification;
+        public final String localFilename;
+        public final int status;
+        public final int totalSize;
+        public final int bytesDownloaded;
+        public final int reason;
 
         private DownloadInfo(long id, String url, String title, long lastModification, String localFilename, int status, int totalSize, int bytesDownloaded, int reason) {
             this.id = id;

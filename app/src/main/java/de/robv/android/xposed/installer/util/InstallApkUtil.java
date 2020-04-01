@@ -34,16 +34,18 @@ public class InstallApkUtil extends AsyncTask<Void, Void, Integer> {
         mRootUtil = new RootUtil();
     }
 
-    static void installApkNormally(Context context, String uri) {
+    public static void installApkNormally(Context context, String localFilename) {
         Intent installIntent = new Intent(Intent.ACTION_INSTALL_PACKAGE);
-        installIntent.putExtra(Intent.EXTRA_INSTALLER_PACKAGE_NAME, context.getApplicationInfo().packageName);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Uri uri;
+        if (Build.VERSION.SDK_INT >= 24) {
+            uri = FileProvider.getUriForFile(context, "de.robv.android.xposed.installer.fileprovider", new File(localFilename));
             installIntent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            installIntent.setData(FileProvider.getUriForFile(context, "de.robv.android.xposed.installer.fileprovider", new File(Uri.parse(uri).getPath())));
         } else {
-            installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            installIntent.setDataAndType(Uri.parse("file://" + uri), DownloadsUtil.MIME_TYPE_APK);
+            uri = Uri.fromFile(new File(localFilename));
         }
+        installIntent.setDataAndType(uri, DownloadsUtil.MIME_TYPE_APK);
+        installIntent.putExtra(Intent.EXTRA_INSTALLER_PACKAGE_NAME, context.getApplicationInfo().packageName);
         context.startActivity(installIntent);
     }
 
@@ -97,7 +99,7 @@ public class InstallApkUtil extends AsyncTask<Void, Void, Integer> {
             if (result.equals(0)) {
                 NotificationUtil.showModuleInstallNotification(R.string.installation_successful, R.string.installation_successful_message, info.localFilename, info.title);
             } else if (failureMatcher.find()) {
-                NotificationUtil.showModuleInstallNotification(R.string.installation_error, R.string.installation_error_message, info.localFilename, failureMatcher.group(1));
+                NotificationUtil.showModuleInstallNotification(R.string.installation_error, R.string.installation_error_message, info.localFilename, info.title, failureMatcher.group(1));
             }
         } else {
             installApkNormally(context, info.localFilename);

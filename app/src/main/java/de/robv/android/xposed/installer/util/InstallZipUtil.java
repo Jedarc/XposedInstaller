@@ -1,35 +1,45 @@
 package de.robv.android.xposed.installer.util;
 
 import android.content.Context;
+import android.content.res.Resources;
+import android.os.Build;
+import android.util.Log;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
+import de.robv.android.xposed.installer.BuildConfig;
 import de.robv.android.xposed.installer.R;
 import de.robv.android.xposed.installer.XposedApp;
 import de.robv.android.xposed.installer.installation.FlashCallback;
+import de.robv.android.xposed.installer.installation.StatusInstallerFragment;
 
 public final class InstallZipUtil {
+    private static final Set<String> FEATURES = new HashSet<>();
+
+    static {
+        FEATURES.add("fbe_aware"); // BASE_DIR in /data/user_de/0 on SDK24+
+    }
+
     private InstallZipUtil() {}
 
-    public static ZipCheckResult checkZip(String zipPath) {
-        ZipFile zip;
+    public static ZipFile getZip(String path) {
         try {
-            zip = new ZipFile(zipPath);
+            return new ZipFile(path);
         } catch (IOException e) {
-            return new ZipCheckResult();
+            return null;
         }
-
-        ZipCheckResult result = checkZip(zip);
-        closeSilently(zip);
-        return result;
     }
 
     public static ZipCheckResult checkZip(ZipFile zip) {
-        ZipCheckResult result = new ZipCheckResult();
+        ZipCheckResult result = new ZipCheckResult(zip);
 
         // Check for update-binary.
         if (zip.getEntry("META-INF/com/google/android/update-binary") == null) {
@@ -41,6 +51,15 @@ public final class InstallZipUtil {
         // Check whether the file can be flashed directly in the app.
         if (zip.getEntry("META-INF/com/google/android/flash-script.sh") != null) {
             result.mFlashableInApp = true;
+        }
+
+        ZipEntry xposedPropEntry = zip.getEntry("system/xposed.prop");
+        if (xposedPropEntry != null) {
+            try {
+                result.mXposedProp = parseXposedProp(zip.getInputStream(xposedPropEntry));
+            } catch (IOException e) {
+                Log.e(XposedApp.TAG, "Failed to read system/xposed.prop from " + zip.getName(), e);
+            }
         }
 
         return result;
@@ -72,6 +91,8 @@ public final class InstallZipUtil {
                 prop.mMinSdk = Integer.parseInt(value);
             } else if (key.equals("maxsdk")) {
                 prop.mMaxSdk = Integer.parseInt(value);
+            } else if (key.startsWith("requires:")) {
+                prop.mRequires.add(key.substring(9));
             }
         }
         reader.close();
@@ -100,6 +121,10 @@ public final class InstallZipUtil {
             case FlashCallback.ERROR_NOT_FLASHABLE_IN_APP:
                 return context.getString(R.string.flash_error_not_flashable_in_app);
 
+            case FlashCallback.ERROR_INSTALLER_NEEDS_UPDATE:
+                Resources res = context.getResources();
+                return res.getString(R.string.installer_needs_update, res.getString(R.string.app_name));
+
             default:
                 return context.getString(R.string.flash_error_default, code);
         }
@@ -115,9 +140,24 @@ public final class InstallZipUtil {
         } catch (IOException ignored) {}
     }
 
+    public static void reportMissingFeatures(Set<String> missingFeatures) {
+        Log.e(XposedApp.TAG, "Installer version: " + BuildConfig.VERSION_NAME);
+        Log.e(XposedApp.TAG, "Missing installer features: " + missingFeatures);
+    }
+
     public static class ZipCheckResult {
+        private final ZipFile mZip;
         private boolean mValidZip = false;
         private boolean mFlashableInApp = false;
+        private XposedProp mXposedProp = null;
+
+        private ZipCheckResult(ZipFile zip) {
+            mZip = zip;
+        }
+
+        public ZipFile getZip() {
+            return mZip;
+        }
 
         public boolean isValidZip() {
             return mValidZip;
@@ -125,6 +165,14 @@ public final class InstallZipUtil {
 
         public boolean isFlashableInApp() {
             return mFlashableInApp;
+        }
+
+        public boolean hasXposedProp() {
+            return mXposedProp != null;
+        }
+
+        public XposedProp getXposedProp() {
+            return mXposedProp;
         }
     }
 
@@ -134,6 +182,7 @@ public final class InstallZipUtil {
         private String mArch = null;
         private int mMinSdk = 0;
         private int mMaxSdk = 0;
+        private Set<String> mRequires = new HashSet<>();
 
         private boolean isComplete() {
             return mVersion != null
@@ -145,6 +194,28 @@ public final class InstallZipUtil {
 
         public String getVersion() {
             return mVersion;
+        }
+
+        public int getVersionInt() {
+            return mVersionInt;
+        }
+
+        public boolean isArchCompatible() {
+            return StatusInstallerFragment.ARCH.equals(mArch);
+        }
+
+        public boolean isSdkCompatible() {
+            return mMinSdk <= Build.VERSION.SDK_INT && Build.VERSION.SDK_INT <= mMaxSdk;
+        }
+
+        public Set<String> getMissingInstallerFeatures() {
+            Set<String> missing = new TreeSet<>(mRequires);
+            missing.removeAll(FEATURES);
+            return missing;
+        }
+
+        public boolean isCompatible() {
+            return isSdkCompatible() && isArchCompatible();
         }
 
     }
